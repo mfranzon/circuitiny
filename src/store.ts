@@ -1,7 +1,6 @@
 import { create } from 'zustand'
-import { type Project, emptyProject, type PinType, type Behavior } from './project/schema'
+import { type Project, emptyProject, type PinType } from './project/schema'
 import { catalog } from './catalog'
-import type { PendingSequence } from './sim/evaluate'
 
 export type Mode = 'project' | 'catalog-editor'
 
@@ -47,9 +46,6 @@ interface State {
   simStrips: Record<string, Array<[number, number, number]>>  // instance → per-pixel [r,g,b]
   simLog: string[]              // most recent simulation log lines
   pendingEdges: Array<{ label: string; type: 'rising' | 'falling' }>
-  simPendingSequences: PendingSequence[]
-  simSpeed: 1 | 2 | 5 | 10     // time multiplier applied each tick
-  simMode: 'js' | 'native'
   nativeCompileStatus: 'idle' | 'compiling' | 'ready' | 'error'
   nativeCompileError: string | null
   nativeBinaryPath: string | null
@@ -77,20 +73,12 @@ interface State {
   bumpCatalog: () => void
   setSimulating: (b: boolean) => void
   tickSim: () => void
-  simStep: (dtMs: number, gpios: Record<string, boolean>, strips: Record<string, Array<[number, number, number]>>, logs: string[], pendingSequences: PendingSequence[]) => void
   pressButton: (boardPinLabel: string) => void
   releaseButton: (boardPinLabel: string) => void
-  setSimSpeed: (s: 1 | 2 | 5 | 10) => void
-  setSimMode: (m: 'js' | 'native') => void
   setNativeCompile: (status: 'idle' | 'compiling' | 'ready' | 'error', error?: string | null, binaryPath?: string | null) => void
   setNativeRunId: (id: string | null) => void
 
   setCustomCode: (file: string, code: string) => void
-
-  addBehavior: () => string
-  removeBehavior: (id: string) => void
-  updateBehavior: (id: string, patch: Partial<Behavior>) => void
-  setBehavior: (b: Behavior) => void
 
   loadDraftGlb: (path: string, name: string, data: Uint8Array, suggestedScale?: number) => void
   setDraftMeta: (patch: Partial<Pick<CatalogDraft, 'id' | 'name' | 'category' | 'scale'>>) => void
@@ -131,9 +119,6 @@ export const useStore = create<State>((set) => ({
   simStrips: {},
   simLog: [],
   pendingEdges: [],
-  simPendingSequences: [],
-  simSpeed: 1,
-  simMode: 'js',
   nativeCompileStatus: 'idle',
   nativeCompileError: null,
   nativeBinaryPath: null,
@@ -146,7 +131,7 @@ export const useStore = create<State>((set) => ({
     project, savedPath: path ?? null, dirty: false,
     past: [], future: [],
     mode: 'project', selected: null, pendingPin: null,
-    simulating: false, simTime: 0, simGpios: {}, simStrips: {}, simLog: [], pendingEdges: [], simPendingSequences: []
+    simulating: false, simTime: 0, simGpios: {}, simStrips: {}, simLog: [], pendingEdges: []
   }),
   markSaved: (savedPath) => set({ savedPath, dirty: false }),
   openBoardPicker: () => set({ showBoardPicker: true }),
@@ -229,18 +214,9 @@ export const useStore = create<State>((set) => ({
   bumpCatalog: () => set((s) => ({ catalogVersion: s.catalogVersion + 1 })),
   setSimulating: (b) => set({
     simulating: b, simPhase: 0,
-    simTime: 0, simGpios: {}, simStrips: {}, simLog: b ? ['[sim] start'] : [], pendingEdges: [], simPendingSequences: []
+    simTime: 0, simGpios: {}, simStrips: {}, simLog: b ? ['[sim] start'] : [], pendingEdges: []
   }),
   tickSim: () => set((s) => ({ simPhase: s.simPhase === 0 ? 1 : 0 })),
-  simStep: (dtMs, gpios, strips, logs, pendingSequences) => set((s) => ({
-    simTime: s.simTime + dtMs,
-    simPhase: s.simPhase === 0 ? 1 : 0,
-    simGpios: gpios,
-    simStrips: strips,
-    simLog: [...s.simLog, ...logs].slice(-200),
-    pendingEdges: [],
-    simPendingSequences: pendingSequences,
-  })),
   pressButton: (label) => set((s) => ({
     simGpios: { ...s.simGpios, [label]: false },
     pendingEdges: [...s.pendingEdges, { label, type: 'falling' as const }]
@@ -249,8 +225,6 @@ export const useStore = create<State>((set) => ({
     simGpios: { ...s.simGpios, [label]: true },
     pendingEdges: [...s.pendingEdges, { label, type: 'rising' as const }]
   })),
-  setSimSpeed: (simSpeed) => set({ simSpeed }),
-  setSimMode: (simMode) => set({ simMode }),
   setNativeCompile: (status, error = null, binaryPath = null) => set({
     nativeCompileStatus: status,
     nativeCompileError: error ?? null,
@@ -262,43 +236,6 @@ export const useStore = create<State>((set) => ({
     ...snapshot(s), dirty: true,
     project: { ...s.project, customCode: { ...s.project.customCode, [file]: code } }
   })),
-
-  addBehavior: () => {
-    const id = `beh${Date.now().toString(36)}`
-    set((s) => ({
-      ...snapshot(s), dirty: true,
-      project: {
-        ...s.project,
-        behaviors: [...s.project.behaviors, {
-          id, trigger: { type: 'timer', period_ms: 1000 }, actions: []
-        }]
-      }
-    }))
-    return id
-  },
-  removeBehavior: (id) => set((s) => ({
-    ...snapshot(s), dirty: true,
-    project: { ...s.project, behaviors: s.project.behaviors.filter((b) => b.id !== id) }
-  })),
-  updateBehavior: (id, patch) => set((s) => ({
-    ...snapshot(s), dirty: true,
-    project: {
-      ...s.project,
-      behaviors: s.project.behaviors.map((b) => b.id === id ? { ...b, ...patch } : b)
-    }
-  })),
-  setBehavior: (b) => set((s) => {
-    const exists = s.project.behaviors.some((x) => x.id === b.id)
-    return {
-      ...snapshot(s), dirty: true,
-      project: {
-        ...s.project,
-        behaviors: exists
-          ? s.project.behaviors.map((x) => x.id === b.id ? b : x)
-          : [...s.project.behaviors, b]
-      }
-    }
-  }),
 
   undo: () => set((s) => {
     if (!s.past.length) return {}
@@ -361,30 +298,6 @@ function seed(): Project {
     { id: 'net3', endpoints: ['led1.cathode',   'board.gnd_l0'] }, // LED cathode → GND
     { id: 'net4', endpoints: ['board.gpio13',   'btn1.a']      },  // GPIO13 → button A
     { id: 'net5', endpoints: ['btn1.b',         'board.gnd_r0'] }  // button B → GND
-  )
-
-  p.behaviors.push(
-    {
-      id: 'on_boot',
-      trigger: { type: 'boot' },
-      actions: [{ type: 'log', level: 'info', message: 'Circuitiny ready — hold button to light LED' }]
-    },
-    {
-      id: 'on_press',
-      trigger: { type: 'gpio_edge', source: 'btn1.a', edge: 'falling' },
-      actions: [
-        { type: 'set_output', target: 'led1.anode', value: 'on' },
-        { type: 'log', level: 'info', message: 'button pressed — LED on' }
-      ]
-    },
-    {
-      id: 'on_release',
-      trigger: { type: 'gpio_edge', source: 'btn1.a', edge: 'rising' },
-      actions: [
-        { type: 'set_output', target: 'led1.anode', value: 'off' },
-        { type: 'log', level: 'info', message: 'button released — LED off' }
-      ]
-    }
   )
 
   return p

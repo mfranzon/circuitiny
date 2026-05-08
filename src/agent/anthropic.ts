@@ -2,7 +2,7 @@
 // Tool schema differs from OpenAI: uses `input_schema` instead of `parameters`,
 // and tool results are `user` messages with a `tool_result` content block.
 
-import { tools, execTool, makeExecContext } from './tools'
+import { tools, execTool, makeExecContext, trimConvForApi } from './tools'
 import type { Msg, AgentCallbacks, ProviderConfig } from './types'
 
 // Convert our OpenAI-format tool list to Anthropic format.
@@ -77,7 +77,7 @@ export async function chatAnthropic(
 
   for (let loop = 0; loop < maxLoops; loop++) {
     if (signal?.aborted) { cb.onError('aborted'); return }
-    const { system, messages } = toAnthropicMessages(conv)
+    const { system, messages } = toAnthropicMessages(trimConvForApi(conv))
 
     let resp: Response
     try {
@@ -167,11 +167,18 @@ export async function chatAnthropic(
 
     if (!toolCalls?.length) return
 
+    execCtx.abortBatch = false
     for (const call of toolCalls) {
       if (signal?.aborted) { cb.onError('aborted'); return }
       const name = call.function.name
       const args = call.function.arguments ?? {}
-      const result = await execTool(name, args, execCtx)
+
+      // If a critical tool failed earlier in this batch, skip the rest.
+      // We still push a tool_result so the Anthropic API gets one per tool_use.
+      const result = execCtx.abortBatch
+        ? { ok: false as const, error: 'Skipped: a previous step in this batch failed. Fix the errors above and try again.' }
+        : await execTool(name, args, execCtx)
+
       cb.onToolCall(name, args, result)
       const toolMsg: Msg = {
         role: 'tool', tool_name: name, name, tool_call_id: call.id,

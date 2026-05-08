@@ -50,7 +50,13 @@ function parseToolCalls(text: string): Array<{ name: string; args: any }> {
 function formatConversation(conv: Msg[]): string {
   const lines: string[] = []
   for (const m of conv) {
-    if (m.role === 'system') continue
+    if (m.role === 'system') {
+      // Claude Code has no separate system field — inject it as the opening human turn
+      // so the firmware rules and project context reach the model.
+      lines.push(`Human: [System instructions]\n${m.content}`)
+      lines.push('Assistant: Understood. I will follow these instructions and use only the tools listed in the protocol.')
+      continue
+    }
     if (m.role === 'user') {
       lines.push(`Human: ${m.content}`)
     } else if (m.role === 'assistant') {

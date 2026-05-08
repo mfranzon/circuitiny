@@ -10,7 +10,6 @@ import Palette from './panes/Palette'
 import BoardPicker from './panes/BoardPicker'
 import { useStore } from './store'
 import { hydrateCatalog } from './catalog/hydrate'
-import { useSimLoop } from './sim/useSimLoop'
 import { useNativeSimLoop } from './sim/useNativeSimLoop'
 
 export default function App() {
@@ -25,7 +24,6 @@ export default function App() {
   const loadProject = useStore((s) => s.loadProject)
   const markSaved = useStore((s) => s.markSaved)
 
-  useSimLoop()
   useNativeSimLoop()
 
   useEffect(() => {
@@ -103,7 +101,7 @@ function ProjectMode() {
               </Panel>
               <ResizeH />
               <Panel defaultSize={40} minSize={15}>
-                <PaneFrame title="Schematic / Behaviors" noPad><SchematicTabs /></PaneFrame>
+                <PaneFrame title="Schematic" noPad><SchematicTabs /></PaneFrame>
               </Panel>
             </PanelGroup>
           </Panel>

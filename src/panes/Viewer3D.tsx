@@ -9,7 +9,7 @@ import { resolveSchematicSymbol } from '../project/component'
 import { catalog, pinColor } from '../catalog'
 import { resolvePin, netColor } from '../project/pins'
 import { runDrc, suggestSafePin, type Violation } from '../drc'
-import { STRIP_LED_N } from '../sim/evaluate'
+const STRIP_LED_N = 8
 
 function PinAnchor({ pin, owner, position, color, glow, onClick }: {
   pin: PinDef
@@ -119,11 +119,20 @@ function BoardWithPins() {
   )
 }
 
-function LoadedGlb({ url, scale = 1, lit, simActive }: {
-  url: string; scale?: number; lit?: boolean; simActive?: boolean
+// Per-LED emissive + glow color, keyed by catalog id. Used by LoadedGlb so
+// imported LED GLBs glow with the right color when their pin is driven HIGH.
+const LED_GLB_GLOW: Record<string, { emissive: string; light: string }> = {
+  'led-5mm-red':    { emissive: '#ff2200', light: '#ff4400' },
+  'led-5mm-green':  { emissive: '#22ff22', light: '#44ff44' },
+  'led-5mm-yellow': { emissive: '#ffdd00', light: '#ffee44' },
+}
+
+function LoadedGlb({ url, scale = 1, lit, simActive, componentId }: {
+  url: string; scale?: number; lit?: boolean; simActive?: boolean; componentId?: string
 }) {
   const gltf = useGLTF(url)
   const scene = useMemo(() => gltf.scene.clone(true), [gltf])
+  const glow = (componentId && LED_GLB_GLOW[componentId]) ?? { emissive: '#ff2200', light: '#ff4400' }
 
   // Apply emissive tint to all meshes when lit or active.
   useEffect(() => {
@@ -132,7 +141,7 @@ function LoadedGlb({ url, scale = 1, lit, simActive }: {
         const mat = child.material as THREE.MeshStandardMaterial
         if (!mat) return
         if (lit) {
-          mat.emissive = new THREE.Color('#ff2200')
+          mat.emissive = new THREE.Color(glow.emissive)
           mat.emissiveIntensity = 1.5
         } else if (simActive) {
           mat.emissive = new THREE.Color('#0044ff')
@@ -143,12 +152,12 @@ function LoadedGlb({ url, scale = 1, lit, simActive }: {
         }
       }
     })
-  }, [scene, lit, simActive])
+  }, [scene, lit, simActive, glow.emissive])
 
   return (
     <group>
       <primitive object={scene} scale={[scale, scale, scale]} />
-      {lit && <pointLight position={[0, 0.004, 0]} intensity={0.03} distance={0.06} color="#ff4400" />}
+      {lit && <pointLight position={[0, 0.004, 0]} intensity={0.03} distance={0.06} color={glow.light} />}
       {simActive && !lit && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, 0]}>
           <ringGeometry args={[0.005, 0.006, 24]} />
@@ -238,21 +247,27 @@ function DefaultBody({ componentId, schematicSymbol, onClick, selected, lit, pix
   if (schematicSymbol === 'ledstrip') {
     return <LedStripBody lit={lit} pixels={pixels} onClick={onClick} />
   }
-  // LED: dome + two leads.
-  if (componentId === 'led-5mm-red') {
-    const emissive = lit ? '#ff3030' : (selected ? '#551100' : '#220000')
+  // LED: dome + two leads (red / green / yellow variants).
+  const LED_COLORS: Record<string, { base: string; emissiveLit: string; emissiveOff: string; emissiveSel: string; light: string }> = {
+    'led-5mm-red':    { base: '#ff1a1a', emissiveLit: '#ff3030', emissiveOff: '#220000', emissiveSel: '#551100', light: '#ff4040' },
+    'led-5mm-green':  { base: '#1aff1a', emissiveLit: '#30ff30', emissiveOff: '#002200', emissiveSel: '#115511', light: '#40ff40' },
+    'led-5mm-yellow': { base: '#ffee00', emissiveLit: '#ffdd00', emissiveOff: '#221a00', emissiveSel: '#554400', light: '#ffee40' },
+  }
+  if (componentId in LED_COLORS) {
+    const c = LED_COLORS[componentId]
+    const emissive = lit ? c.emissiveLit : (selected ? c.emissiveSel : c.emissiveOff)
     const emissiveIntensity = lit ? 3 : 1
     return (
       <group onClick={onClick}>
-        {lit && <pointLight position={[0, 0.002, 0]} intensity={0.02} distance={0.05} color="#ff4040" />}
+        {lit && <pointLight position={[0, 0.002, 0]} intensity={0.02} distance={0.05} color={c.light} />}
         <mesh position={[0, 0, 0]} castShadow>
           <sphereGeometry args={[0.0025, 16, 12]} />
-          <meshStandardMaterial color="#ff1a1a" transparent opacity={0.65}
+          <meshStandardMaterial color={c.base} transparent opacity={0.65}
                                 emissive={emissive} emissiveIntensity={emissiveIntensity} />
         </mesh>
         <mesh position={[0, -0.0025, 0]}>
           <cylinderGeometry args={[0.0025, 0.0025, 0.001, 16]} />
-          <meshStandardMaterial color="#ff2222" transparent opacity={0.85}
+          <meshStandardMaterial color={c.base} transparent opacity={0.85}
                                 emissive={emissive} emissiveIntensity={emissiveIntensity * 0.5} />
         </mesh>
         <mesh position={[-0.0012, -0.005, 0]}>
@@ -426,7 +441,7 @@ function ComponentWithPins({ c, selected, lit, simActive }: {
         {isDisplay && glbUrl && simulating
           ? <OledDisplayBody url={glbUrl} scale={def?.scale ?? 1} lit={lit} simActive={simActive} simLog={simLog} />
           : glbUrl
-            ? <LoadedGlb url={glbUrl} scale={def?.scale ?? 1} lit={lit} simActive={simActive} />
+            ? <LoadedGlb url={glbUrl} scale={def?.scale ?? 1} lit={lit} simActive={simActive} componentId={c.componentId} />
             : <DefaultBody componentId={c.componentId} schematicSymbol={resolveSchematicSymbol(def?.schematic)} selected={selected} lit={lit}
                            pixels={pixels} isButton={isButton} simActive={simActive}
                            onClick={() => {}} />}

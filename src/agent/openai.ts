@@ -1,7 +1,7 @@
 // OpenAI-compatible chat client (works for OpenAI and OpenRouter).
 // Streams SSE chunks; iterates tool calls until the model stops.
 
-import { tools, execTool, makeExecContext } from './tools'
+import { tools, execTool, makeExecContext, trimConvForApi } from './tools'
 import type { Msg, AgentCallbacks, ProviderConfig } from './types'
 
 export async function chatOpenAI(
@@ -31,7 +31,7 @@ export async function chatOpenAI(
         headers,
         body: JSON.stringify({
           model: cfg.model,
-          messages: conv,
+          messages: trimConvForApi(conv),
           tools,
           tool_choice: 'auto',
           stream: true,
@@ -99,11 +99,16 @@ export async function chatOpenAI(
 
     if (!toolCalls?.length) return
 
+    execCtx.abortBatch = false
     for (const call of toolCalls) {
       if (signal?.aborted) { cb.onError('aborted'); return }
       const name = call.function.name
       const args = call.function.arguments ?? {}
-      const result = await execTool(name, args, execCtx)
+
+      const result = execCtx.abortBatch
+        ? { ok: false as const, error: 'Skipped: a previous step in this batch failed. Fix the errors above and try again.' }
+        : await execTool(name, args, execCtx)
+
       cb.onToolCall(name, args, result)
       const toolMsg: Msg = {
         role: 'tool', tool_name: name, name, tool_call_id: call.id,

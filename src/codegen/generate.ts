@@ -1,7 +1,7 @@
 // Template assembly — produces main.c, CMakeLists.txt, sdkconfig.defaults from the IR.
 // Deterministic output (stable ordering, no timestamps) so regeneration is idempotent.
 
-import type { Project, Behavior, Action } from '../project/schema'
+import type { Project } from '../project/schema'
 import { buildIr, type Ir } from './ir'
 import { catalog } from '../catalog'
 
@@ -34,53 +34,9 @@ export function generate(project: Project): { files: GeneratedFiles; ir: Ir } {
       .map((p) => `#define PIN_${upperSnake(c.instance)}_${upperSnake(p.id)} ${p.boardGpioNum}`)
   )
 
-  // Resolve behavior targets and emit per-behavior tasks / boot hooks.
-  const pinResolver = buildPinResolver(project)
-
-  // ── gpio_edge behaviors ──────────────────────────────────────────────────
-  // Group by resolved source pin so press+release on the same GPIO share one task.
-  const edgeGroups: EdgeGroup[] = []
-  const edgePinExprs = new Set<string>()
-  for (const beh of project.behaviors) {
-    if (beh.trigger.type !== 'gpio_edge') continue
-    const pinExpr = pinResolver(beh.trigger.source)
-    if (!pinExpr) continue
-    edgePinExprs.add(pinExpr)
-    let g = edgeGroups.find((eg) => eg.pinExpr === pinExpr)
-    if (!g) { g = { pinExpr, behaviors: [] }; edgeGroups.push(g) }
-    g.behaviors.push({ beh, edge: beh.trigger.edge ?? 'rising' })
-  }
-  const edgeTasks = edgeGroups.map((g) => emitGpioEdgeTask(g, pinResolver))
-  const edgeInitLines = edgeGroups.flatMap((g) => [
-    `// --- edge input: ${g.pinExpr} ---`,
-    `gpio_reset_pin(${g.pinExpr});`,
-    `gpio_set_direction(${g.pinExpr}, GPIO_MODE_INPUT);`,
-    `gpio_set_pull_mode(${g.pinExpr}, GPIO_PULLUP_ONLY);`,
-  ])
-  const edgeLaunchers = edgeGroups.map((g, i) =>
-    `xTaskCreate(gpio_poll_${sanitize(g.pinExpr)}_task, "gp_${i}", 3072, NULL, 5, NULL);`
-  )
-
-  // gpio.h is already pulled in by digital pins, but guarantee it when edge triggers are present.
-  if (edgeGroups.length > 0) includes.add('"driver/gpio.h"')
-
-  const initLines = sorted.flatMap((c) => emitInit(c, edgePinExprs))
+  const initLines = sorted.flatMap((c) => emitInit(c))
 
   const i2cInit = ir.buses.filter((b) => b.kind === 'i2c').map(emitI2cInit)
-
-  const bootActions: string[] = []
-  const behaviorTasks: string[] = []
-  const behaviorLaunchers: string[] = []
-  for (const beh of project.behaviors) {
-    if (beh.trigger.type === 'boot') {
-      bootActions.push(`// behavior ${beh.id}`)
-      bootActions.push(...emitActions(beh.actions, pinResolver))
-    } else if (beh.trigger.type === 'timer') {
-      behaviorTasks.push(emitTimerTask(beh, pinResolver))
-      behaviorLaunchers.push(`xTaskCreate(beh_${sanitize(beh.id)}_task, "${sanitize(beh.id)}", 3072, NULL, 5, NULL);`)
-    }
-    // gpio_edge → handled above; other triggers (wifi_connected, mqtt_received) not yet implemented
-  }
 
   const mainC = [
     HEADER,
@@ -90,19 +46,13 @@ export function generate(project: Project): { files: GeneratedFiles; ir: Ir } {
     '',
     ...(pinDefines.length ? [pinDefines.join('\n'), ''] : []),
     ...i2cInit,
-    ...behaviorTasks,
-    ...edgeTasks,
     `void app_main(void)`,
     `{`,
     `    ESP_ERROR_CHECK(nvs_flash_init());`,
     `    ESP_LOGI(TAG, "boot: ${ir.board} / ${sorted.length} component(s) / ${ir.buses.length} bus(es)");`,
     ...initLines.map((l) => `    ${l}`),
-    ...edgeInitLines.map((l) => `    ${l}`),
     ...(ir.app.wifi ? ['    // TODO: wifi_init_sta() — credentials from NVS'] : []),
     ...(ir.app.mqtt ? ['    // TODO: mqtt_app_start()'] : []),
-    ...bootActions.map((l) => `    ${l}`),
-    ...behaviorLaunchers.map((l) => `    ${l}`),
-    ...edgeLaunchers.map((l) => `    ${l}`),
     `}`,
     ''
   ].filter((s) => s !== null).join('\n')
@@ -147,17 +97,12 @@ export function generate(project: Project): { files: GeneratedFiles; ir: Ir } {
 }
 
 function emitInit(
-  c: { instance: string; pins: Array<{ id: string; type: string; boardGpioNum: number | null }> },
-  skipMacros: Set<string> = new Set()
+  c: { instance: string; pins: Array<{ id: string; type: string; boardGpioNum: number | null }> }
 ): string[] {
   const lines: string[] = []
   for (const p of c.pins) {
     if (p.boardGpioNum === null) continue
     const pinMacro = `PIN_${upperSnake(c.instance)}_${upperSnake(p.id)}`
-    if (skipMacros.has(pinMacro)) continue   // gpio_edge source — configured by edge init section
-    // 'digital_in'  = component input  → MCU drives it   → GPIO_MODE_OUTPUT
-    // 'digital_out' = component output → MCU reads it    → GPIO_MODE_INPUT
-    // 'digital_io'  = bidirectional    → default OUTPUT
     if (p.type === 'digital_in' || p.type === 'digital_io') {
       lines.push(`gpio_reset_pin(${pinMacro});`)
       lines.push(`gpio_set_direction(${pinMacro}, GPIO_MODE_OUTPUT);`)
@@ -168,43 +113,6 @@ function emitInit(
   }
   if (lines.length) lines.unshift(`// --- ${c.instance} (${c.pins.length} pins) ---`)
   return lines
-}
-
-type EdgeGroup = {
-  pinExpr: string
-  behaviors: Array<{ beh: Behavior; edge: 'rising' | 'falling' | 'both' }>
-}
-
-function emitGpioEdgeTask(group: EdgeGroup, resolve: PinResolver): string {
-  const name = sanitize(group.pinExpr)
-  const dispatchLines: string[] = []
-  for (const { beh, edge } of group.behaviors) {
-    const actionLines = emitActions(beh.actions, resolve).map((l) => `                ${l}`)
-    if (edge === 'both') {
-      dispatchLines.push(`            // behavior ${beh.id} — any edge`)
-      dispatchLines.push(...actionLines)
-    } else {
-      const cond = edge === 'rising' ? 'cur_ == 1' : 'cur_ == 0'
-      dispatchLines.push(`            if (${cond}) { // behavior ${beh.id}`)
-      dispatchLines.push(...actionLines)
-      dispatchLines.push(`            }`)
-    }
-  }
-  return [
-    `static void gpio_poll_${name}_task(void *arg)`,
-    `{`,
-    `    int last_ = gpio_get_level(${group.pinExpr});`,
-    `    for (;;) {`,
-    `        vTaskDelay(pdMS_TO_TICKS(10));`,
-    `        int cur_ = gpio_get_level(${group.pinExpr});`,
-    `        if (cur_ != last_) {`,
-    `            last_ = cur_;`,
-    ...(dispatchLines.length ? dispatchLines : ['            // no actions']),
-    `        }`,
-    `    }`,
-    `}`,
-    ``
-  ].join('\n')
 }
 
 function emitI2cInit(b: { id: string; pins: Record<string, string | null> }): string {
@@ -228,134 +136,9 @@ function emitI2cInit(b: { id: string; pins: Record<string, string | null> }): st
 
 function upperSnake(s: string) { return s.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase() }
 function quoted(s: string) { return s.startsWith('"') || s.startsWith('<') ? s : `"${s}"` }
-function sanitize(s: string) { return s.replace(/[^a-zA-Z0-9_]/g, '_') }
-
-// Resolve "instance.pin" (or "board.pinId") to a C expression usable in gpio_* calls.
-// For board pins: returns the raw GPIO number string (e.g. "16").
-// For component pins directly wired to a board GPIO: returns the PIN_* macro.
-// For component pins reachable only through passive components: traces through nets
-// and returns the raw GPIO number of the first board pin found.
-type PinResolver = (target: string) => string | null
-
-function buildPinResolver(project: Project): PinResolver {
-  const board = catalog.getBoard(project.board)
-
-  // Walk nets, crossing through 2-pin passives, to find the board GPIO label.
-  function traceToGpioLabel(ref: string, visited = new Set<string>()): string | null {
-    if (visited.has(ref)) return null
-    visited.add(ref)
-    if (ref.startsWith('board.')) {
-      if (!board) return null
-      const p = board.pins.find((x) => x.id === ref.split('.')[1])
-      return (p && /^\d+$/.test(p.label)) ? p.label : null
-    }
-    const net = project.nets.find((n) => n.endpoints.includes(ref))
-    if (!net) return null
-    for (const ep of net.endpoints) {
-      if (ep === ref) continue
-      if (ep.startsWith('board.')) {
-        const label = traceToGpioLabel(ep, visited)
-        if (label) return label
-      } else {
-        const [inst] = ep.split('.')
-        const comp = project.components.find((c) => c.instance === inst)
-        if (!comp) continue
-        const def = catalog.getComponent(comp.componentId)
-        if (!def || def.pins.length !== 2) continue   // passives only
-        for (const p of def.pins) {
-          const other = `${inst}.${p.id}`
-          if (other === ep) continue
-          const label = traceToGpioLabel(other, visited)
-          if (label) return label
-        }
-      }
-    }
-    return null
-  }
-
-  return (target) => {
-    if (!target.includes('.')) return null
-    const [owner, pinId] = target.split('.')
-    if (owner === 'board') {
-      if (!board) return null
-      const p = board.pins.find((x) => x.id === pinId)
-      return (p && /^\d+$/.test(p.label)) ? p.label : null
-    }
-    if (!project.components.find((c) => c.instance === owner)) return null
-
-    // Check if this pin has a direct board GPIO via a net (no passives needed).
-    const directNet = project.nets.find((n) => n.endpoints.includes(`${owner}.${pinId}`))
-    const directBoard = directNet?.endpoints.find((e) => e.startsWith('board.'))
-    if (directBoard) {
-      // Direct connection → return named PIN macro (matches the #define).
-      return `PIN_${upperSnake(owner)}_${upperSnake(pinId)}`
-    }
-
-    // Indirect (through passives) → trace to board GPIO number.
-    return traceToGpioLabel(`${owner}.${pinId}`)
-  }
-}
-
-function emitActions(actions: Action[], resolve: PinResolver): string[] {
-  const out: string[] = []
-  for (const a of actions) {
-    switch (a.type) {
-      case 'set_output': {
-        const pin = resolve(a.target)
-        if (!pin) { out.push(`// skip set_output: unresolved ${a.target}`); break }
-        out.push(`gpio_set_level(${pin}, ${a.value === 'on' ? 1 : 0});`)
-        break
-      }
-      case 'toggle': {
-        const pin = resolve(a.target)
-        if (!pin) { out.push(`// skip toggle: unresolved ${a.target}`); break }
-        const stateVar = `s_${sanitize(a.target)}`
-        out.push(`static int ${stateVar} = 0; ${stateVar} ^= 1; gpio_set_level(${pin}, ${stateVar});`)
-        break
-      }
-      case 'log': {
-        const macro = a.level === 'warn' ? 'ESP_LOGW' : a.level === 'error' ? 'ESP_LOGE' : 'ESP_LOGI'
-        out.push(`${macro}(TAG, "${escapeC(a.message)}");`)
-        break
-      }
-      case 'delay':
-        out.push(`vTaskDelay(pdMS_TO_TICKS(${a.ms | 0}));`)
-        break
-      case 'sequence':
-        out.push(...emitActions(a.actions, resolve))
-        break
-      default:
-        out.push(`// unsupported action: ${a.type}`)
-    }
-  }
-  return out
-}
-
-function emitTimerTask(beh: Behavior, resolve: PinResolver): string {
-  if (beh.trigger.type !== 'timer') return ''
-  const period = Math.max(1, beh.trigger.period_ms | 0)
-  const name = sanitize(beh.id)
-  const body = emitActions(beh.actions, resolve).map((l) => `        ${l}`).join('\n')
-  return [
-    `static void beh_${name}_task(void *arg)`,
-    `{`,
-    `    TickType_t last = xTaskGetTickCount();`,
-    `    for (;;) {`,
-    `        vTaskDelayUntil(&last, pdMS_TO_TICKS(${period}));`,
-    body || '        // no actions',
-    `    }`,
-    `}`,
-    ''
-  ].join('\n')
-}
-
-function escapeC(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')
-}
 
 function boardSdkconfigFlags(target: string, usbPins: string[]): string[] {
   const hasUsb = usbPins.length > 0
-  // Accurate 1ms tick resolution on all chips — default Hz=100 makes pdMS_TO_TICKS(1) = 10ms.
   const flags: string[] = ['CONFIG_FREERTOS_HZ=1000']
   switch (target) {
     case 'esp32':
@@ -376,7 +159,6 @@ function boardSdkconfigFlags(target: string, usbPins: string[]): string[] {
     case 'esp32c6':
       flags.push('CONFIG_ESP32C6_DEFAULT_CPU_FREQ_160=y')
       if (hasUsb) flags.push('CONFIG_ESP_CONSOLE_USB_CDC=y')
-      // IEEE 802.15.4 (Thread/Zigbee) only when explicitly needed — saves ~100KB flash
       break
     case 'esp32h2':
       flags.push('CONFIG_ESP32H2_DEFAULT_CPU_FREQ_96=y')

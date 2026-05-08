@@ -9,7 +9,6 @@ import { buildExpertPrompt } from './expertPrompt'
 
 export const SYSTEM = `You are an ESP32 design copilot for hobbyists. The user has a 3D board viewer.
 You manipulate the project by calling tools — never describe code or pin assignments in prose when you could just call the tool.
-For common firmware patterns use the shorthand tools: blink(pin, period_ms), set_on_boot(pin, value), on_button_press(button_pin, action_pin, action). Only use set_behavior for complex multi-action sequences.
 
 Workflow rule: when asked to add parts or wire things, call plan_circuit first with your component list to validate IDs and get safe GPIO pins, then add_component, then connect using exact pin refs like "led1.anode" and "board.gpio4".
 After wiring changes, call run_drc to verify. Keep replies to the user short and focused.
@@ -35,7 +34,7 @@ function estimateTokens(msg: Msg): number {
 
 // Keep the system prompt + the most recent messages that fit within TOKEN_BUDGET.
 // Always preserves structural integrity: never drops the last user message.
-const TOKEN_BUDGET = 6_000
+const TOKEN_BUDGET = 12_000
 
 function trimHistory(history: Msg[], systemPrompt: string): Msg[] {
   const sysMsg: Msg = { role: 'system', content: systemPrompt }

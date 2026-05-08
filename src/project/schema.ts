@@ -28,37 +28,6 @@ export interface Net {
   endpoints: string[]          // ["temp1.data", "board.GPIO4"]
 }
 
-export type TriggerKind =
-  | { type: 'sensor_threshold'; source: string; op: '>' | '<' | '>=' | '<=' | '=='; value: number }
-  | { type: 'gpio_edge'; source: string; edge: 'rising' | 'falling' | 'both' }
-  | { type: 'timer'; period_ms: number }
-  | { type: 'mqtt_received'; topic: string }
-  | { type: 'http_request'; method: 'GET' | 'POST'; path: string }
-  | { type: 'boot' }
-  | { type: 'wifi_connected' }
-
-export type Action =
-  | { type: 'set_output'; target: string; value: 'on' | 'off' }
-  | { type: 'toggle'; target: string }
-  | { type: 'read_sensor'; target: string; into: string }
-  | { type: 'mqtt_publish'; topic: string; payload: string }
-  | { type: 'http_get'; url: string; into?: string }
-  | { type: 'http_post'; url: string; body: string }
-  | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string }
-  | { type: 'delay'; ms: number }
-  | { type: 'sequence'; actions: Action[] }
-  | { type: 'if'; cond: string; then: Action[]; else?: Action[] }
-  | { type: 'call_user_fn'; name: string }
-  | { type: 'set_pixel'; target: string; index: number; r: number; g: number; b: number }
-  | { type: 'set_strip'; target: string; pixels: Array<[number, number, number]> }
-
-export interface Behavior {
-  id: string
-  trigger: TriggerKind
-  debounce_ms?: number
-  actions: Action[]
-}
-
 export interface AppConfig {
   wifi: { enabled: boolean; ssid?: string }   // password is in secrets store, not here
   mqtt?: { enabled: boolean; host: string; port: number; clientId?: string }
@@ -73,7 +42,6 @@ export interface Project {
   board: string                // catalog id, e.g. "esp32-devkitc-v4"
   components: ComponentInstance[]
   nets: Net[]
-  behaviors: Behavior[]
   app: AppConfig
   drcOverrides?: string[]      // warning ids the user has dismissed
   customCode?: Record<string, string>  // file path → content, set by agent
@@ -99,6 +67,5 @@ export const emptyProject = (
   board: boardId,
   components: [],
   nets: [],
-  behaviors: [],
   app: { wifi: { enabled: false }, log_level: 'info' }
 })

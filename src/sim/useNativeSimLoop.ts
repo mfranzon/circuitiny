@@ -6,13 +6,12 @@ import { useStore } from '../store'
 //   pendingEdges (button clicks) → binary stdin
 
 export function useNativeSimLoop() {
-  const simulating = useStore((s) => s.simulating)
-  const simMode    = useStore((s) => s.simMode)
+  const simulating  = useStore((s) => s.simulating)
   const nativeRunId = useStore((s) => s.nativeRunId)
 
   // ── GPIO + log events from the binary ─────────────────────────────────
   useEffect(() => {
-    if (!simulating || simMode !== 'native' || !nativeRunId) return
+    if (!simulating || !nativeRunId) return
 
     const api = (window as any).espAI
     if (!api?.onSimEvent || !api?.onSimExit) return
@@ -46,12 +45,11 @@ export function useNativeSimLoop() {
     })
 
     return () => { unsubEvent(); unsubExit() }
-  }, [simulating, simMode, nativeRunId])
+  }, [simulating, nativeRunId])
 
   // ── Button press injection → binary stdin ──────────────────────────────
-  // Uses the single-listener form of subscribe (compatible with Zustand v5).
   useEffect(() => {
-    if (!simulating || simMode !== 'native' || !nativeRunId) return
+    if (!simulating || !nativeRunId) return
 
     const api = (window as any).espAI
     if (!api?.simInject) return
@@ -64,11 +62,10 @@ export function useNativeSimLoop() {
       for (const { label, type } of state.pendingEdges) {
         const pin = parseInt(label, 10)
         if (isNaN(pin)) continue
-        // falling = button press (active-low, pulled up); rising = release
         const val = type === 'falling' ? 0 : 1
         api.simInject(runId, JSON.stringify({ t: 'gpio_in', pin, val }))
       }
       useStore.setState({ pendingEdges: [] })
     })
-  }, [simulating, simMode, nativeRunId])
+  }, [simulating, nativeRunId])
 }

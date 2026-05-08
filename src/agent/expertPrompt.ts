@@ -8,12 +8,12 @@ Design complete, functional circuits: right components, correct wiring, all DRC 
 
 ## Workflow — follow every time
 
-1. think + plan — call \`think\` to reason about the BOM and constraints, then call \`plan_circuit\` with your component list to validate IDs and get safe GPIO pins
+1. think + plan — call \`think\` to reason about the BOM and constraints, then call \`plan_circuit\` with your component list to validate IDs and get safe GPIO pins. You MUST call plan_circuit before the first add_component — never guess component IDs or board pin IDs.
 2. inspect — call \`list_catalog\` if plan_circuit flagged unknown component IDs
 3. execute — add_component → connect (fully wire one component before the next) → run_drc after each connect
 4. fix — if DRC returns errors, follow the fixHint in each error before continuing
-5. behaviors — call \`set_behavior\` for every firmware action; use pin refs that match your wiring
-6. summarise — tell the user: components, pin assignments, what each behavior does; mention ▶ Play to simulate
+5. firmware — call \`write_firmware\` with complete ESP-IDF C code for the application logic
+6. summarise — tell the user: components, pin assignments, what the firmware does; mention ⬡ Compile then ▶ Run to simulate
 
 ## Critical pin rules
 
@@ -26,7 +26,7 @@ Design complete, functional circuits: right components, correct wiring, all DRC 
 ## Tool rules
 
 - call \`think\` before the first \`add_component\`
-- call \`get_project\` before writing behaviors to see what already exists
+- call \`get_project\` before writing firmware to see what already exists
 - call \`run_drc\` after each \`connect\` — not just at the end
 - if a DRC error includes a fixHint, follow its suggestion exactly
 `
@@ -36,14 +36,16 @@ Design complete, functional circuits: right components, correct wiring, all DRC 
 const SNIPPETS: Record<string, string> = {
   led: `
 ## LED wiring
-board.gpioX → resistor.in | resistor.out → led1.anode | led1.cathode → board.GND
-Use 220 Ω for red/yellow (Vf≈2 V, ~5 mA). Always add the resistor before wiring the LED.
-Behavior examples: timer 500 ms → toggle led1.anode (blink) | boot → set_output led1.anode on`,
+Catalog IDs: LED → "led-5mm-red", series resistor → "resistor-220r" (use these exact strings with add_component).
+Call plan_circuit first — it validates IDs and returns safeGpios[].pinId values to use with connect.
+Wiring order: board.<pinId> → r1.in | r1.out → led1.anode | led1.cathode → board.<gnd pinId>
+Use 220 Ω for red/yellow (Vf≈2 V, ~5 mA). Always add and wire the resistor before wiring the LED.
+Firmware example: gpio_set_level(PIN_LED1_ANODE, 1) to turn on; use vTaskDelay for timing.`,
 
   button: `
 ## Button wiring
 btn1.a → board.gpioX | btn1.b → board.GND (rely on GPIO internal pull-up)
-Behavior: trigger gpio_edge source "btn1.a" edge "falling" → toggle or log`,
+Firmware: poll gpio_get_level or use GPIO ISR for edge detection.`,
 
   i2c: `
 ## I2C wiring
@@ -69,17 +71,6 @@ Use UART1 or UART2. Wire TX→RX and RX→TX crossover; share GND.`,
 GPIO → 1 kΩ resistor → NPN transistor base; collector → relay coil → power rail; emitter → GND.
 Add a flyback diode across the coil (cathode toward the supply rail).`,
 
-  behavior: `
-## Behavior shortcuts (prefer these over set_behavior for simple cases)
-| Goal | tool to call |
-|---|---|
-| Blink LED 500 ms | blink(pin: "led1.anode", period_ms: 500) |
-| LED on at boot | set_on_boot(pin: "led1.anode", value: "on") |
-| Button toggles LED | on_button_press(button_pin: "btn1.a", action_pin: "led1.anode", action: "toggle") |
-| Button turns LED on | on_button_press(button_pin: "btn1.a", action_pin: "led1.anode", action: "on") |
-
-Use set_behavior directly only for sequences, delays, logging, or multi-action behaviors.`,
-
   pwm: `
 ## PWM / fading
 Any GPIO supports PWM via the LEDC peripheral. Use set_output or toggle actions targeting the LED pin.`,
@@ -93,7 +84,6 @@ const KEYWORD_MAP: Array<{ pattern: RegExp; key: string }> = [
   { pattern: /\b(spi|mosi|miso|sck|nss)\b/i,                  key: 'spi'      },
   { pattern: /\b(uart|serial|tx\b|rx\b|baud)\b/i,             key: 'uart'     },
   { pattern: /\b(relay|motor|solenoid|coil|flyback)\b/i,      key: 'relay'    },
-  { pattern: /\b(behav|trigger|timer|toggle|boot\b|blink)\b/i,key: 'behavior' },
   { pattern: /\b(pwm|fade|dim|brightness)\b/i,                key: 'pwm'      },
 ]
 

@@ -3,19 +3,47 @@
 import type { ComponentDef, BoardDef, PinDef } from '../project/component'
 import type { PinType } from '../project/schema'
 
+const ledPins = [
+  { id: 'anode',   label: 'A+', type: 'digital_in' as const,
+    voltage: { min: 1.8, max: 3.3, nominal: 2.0 },
+    position: [-0.0012, -0.005, 0] as [number, number, number], normal: [0, -1, 0] as [number, number, number] },
+  { id: 'cathode', label: 'K-', type: 'ground' as const,
+    position: [ 0.0012, -0.005, 0] as [number, number, number], normal: [0, -1, 0] as [number, number, number] }
+]
+
 const ledRed: ComponentDef = {
   id: 'led-5mm-red',
   name: 'LED 5mm Red',
   version: '0.1.0',
   category: 'actuator',
   model: 'led.glb',
-  pins: [
-    { id: 'anode',   label: 'A+', type: 'digital_in',
-      voltage: { min: 1.8, max: 3.3, nominal: 2.0 },
-      position: [-0.0012, -0.005, 0], normal: [0, -1, 0] },
-    { id: 'cathode', label: 'K-', type: 'ground',
-      position: [ 0.0012, -0.005, 0], normal: [0, -1, 0] }
-  ],
+  pins: ledPins,
+  power: { current_ma: 10, rail: '3v3' },
+  driver: { language: 'c', defaultPinAssignments: { anode: 'GPIO4' }, includes: ['driver/gpio.h'] },
+  schematic: { symbol: 'led' },
+  sim: { role: 'led', outputPin: 'anode' }
+}
+
+const ledGreen: ComponentDef = {
+  id: 'led-5mm-green',
+  name: 'LED 5mm Green',
+  version: '0.1.0',
+  category: 'actuator',
+  model: 'led.glb',
+  pins: ledPins,
+  power: { current_ma: 10, rail: '3v3' },
+  driver: { language: 'c', defaultPinAssignments: { anode: 'GPIO4' }, includes: ['driver/gpio.h'] },
+  schematic: { symbol: 'led' },
+  sim: { role: 'led', outputPin: 'anode' }
+}
+
+const ledYellow: ComponentDef = {
+  id: 'led-5mm-yellow',
+  name: 'LED 5mm Yellow',
+  version: '0.1.0',
+  category: 'actuator',
+  model: 'led.glb',
+  pins: ledPins,
   power: { current_ma: 10, rail: '3v3' },
   driver: { language: 'c', defaultPinAssignments: { anode: 'GPIO4' }, includes: ['driver/gpio.h'] },
   schematic: { symbol: 'led' },
@@ -401,6 +429,8 @@ const freenoveWrover: BoardDef = {
 
 const components: Record<string, ComponentDef> = {
   [ledRed.id]:        ledRed,
+  [ledGreen.id]:      ledGreen,
+  [ledYellow.id]:     ledYellow,
   [resistor220.id]:   resistor220,
   [button6mm.id]:     button6mm,
 }

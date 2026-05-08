@@ -351,18 +351,11 @@ function Message({ m }: { m: Msg }) {
   }, [m.role, m.content])
 
   if (m.role === 'tool') {
-    // think results carry no user-visible information — suppress them
-    if (m.tool_name === 'think') return null
-    let parsed: any = null; try { parsed = JSON.parse(m.content) } catch {}
-    return (
-      <div style={{ margin: '3px 0', padding: 4, background: '#161616', border: '1px solid #2a2a2a',
-                    borderRadius: 3, color: '#888', fontSize: 10 }}>
-        <b>tool:{m.tool_name}</b>{' '}
-        {parsed?.ok === false
-          ? <span style={{ color: '#ff6b6b' }}>error: {parsed.error}</span>
-          : <span style={{ color: '#7fc97f' }}>ok</span>}
-      </div>
-    )
+    // Tool results are internal agent feedback — hide them entirely.
+    // Transient errors (wrong IDs, retries) are auto-resolved; the agent's
+    // final prose response tells the user what happened. Blocking failures
+    // surface through the onError callback as a ⚠ message instead.
+    return null
   }
 
   if (m.tool_calls?.length) {
