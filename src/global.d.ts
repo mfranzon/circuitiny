@@ -10,6 +10,7 @@ declare global {
       pickComponent: () => Promise<{ jsonPath: string; json: string; glbData: Uint8Array | null; glbName: string | null } | null>
       writeBundle: (id: string, glbName: string, glbData: Uint8Array, jsonText: string) => Promise<string>
       listCatalog: () => Promise<Array<{ id: string; json: any; glbData: Uint8Array | null }>>
+      listBoardModels: () => Promise<Array<{ id: string; data: Uint8Array }>>
 
       projectWrite: (name: string, target: string, files: Record<string, string>) => Promise<{ dir: string; target: string }>
       listSerialPorts: () => Promise<string[]>

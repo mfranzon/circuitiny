@@ -21,8 +21,17 @@ function inferSchematic(id: string): SchematicSymbolSpec {
 
 export async function hydrateCatalog(): Promise<number> {
   if (!window.espAI?.listCatalog) return 0
-  const entries = await window.espAI.listCatalog()
   let n = 0
+
+  // Built-in board models: shipped under resources/boards/<id>.glb
+  if (window.espAI.listBoardModels) {
+    for (const b of await window.espAI.listBoardModels()) {
+      catalog.registerBoardGlb(b.id, b.data)
+      n++
+    }
+  }
+
+  const entries = await window.espAI.listCatalog()
   for (const e of entries) {
     const j = e.json
     if (!j?.id || !Array.isArray(j.pins)) continue

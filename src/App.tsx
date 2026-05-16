@@ -1,20 +1,27 @@
-import { useEffect, Component, type ReactNode, type ErrorInfo } from 'react'
+import { useEffect, useState, Component, type ReactNode, type ErrorInfo } from 'react'
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels'
 import Viewer3D from './panes/Viewer3D'
 import SchematicTabs from './panes/SchematicTabs'
 import CodeBuildTabs from './panes/CodeBuildTabs'
 import ChatPane from './panes/ChatPane'
-import CatalogEditor3D from './panes/CatalogEditor3D'
-import CatalogEditorPanel from './panes/CatalogEditorPanel'
 import Palette from './panes/Palette'
 import BoardPicker from './panes/BoardPicker'
 import { useStore } from './store'
 import { hydrateCatalog } from './catalog/hydrate'
 import { useNativeSimLoop } from './sim/useNativeSimLoop'
 
+const LS_UI_MODE = 'circuitiny:ui-mode'
+type UiMode = 'beginner' | 'advanced'
+
 export default function App() {
-  const mode = useStore((s) => s.mode)
-  const setMode = useStore((s) => s.setMode)
+  const [uiMode, setUiMode] = useState<UiMode>(() =>
+    (localStorage.getItem(LS_UI_MODE) as UiMode) ?? 'beginner'
+  )
+  function toggleUiMode() {
+    const next: UiMode = uiMode === 'beginner' ? 'advanced' : 'beginner'
+    setUiMode(next)
+    localStorage.setItem(LS_UI_MODE, next)
+  }
   const bump = useStore((s) => s.bumpCatalog)
   const showBoardPicker = useStore((s) => s.showBoardPicker)
   const openBoardPicker = useStore((s) => s.openBoardPicker)
@@ -62,8 +69,13 @@ export default function App() {
       <nav style={{ display: 'flex', gap: 6, padding: '6px 10px', background: '#0a0a0a',
                     borderBottom: '1px solid #333', alignItems: 'center' }}>
         <strong style={{ fontSize: 12, marginRight: 12 }}>Circuitiny</strong>
-        <button onClick={() => setMode('project')} style={tabStyle(mode === 'project')}>Project</button>
-        <button onClick={() => setMode('catalog-editor')} style={tabStyle(mode === 'catalog-editor')}>Catalog Editor</button>
+        <button onClick={toggleUiMode}
+                title={uiMode === 'beginner'
+                  ? 'Beginner mode: just the 3D view and the agent. Click for the full advanced layout.'
+                  : 'Advanced mode: all panels visible. Click for the simpler beginner layout.'}
+                style={modeToggleStyle(uiMode)}>
+          {uiMode === 'beginner' ? '🌱 Beginner' : '⚙ Advanced'}
+        </button>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: dirty ? '#886633' : '#555', marginRight: 4 }}
               title={savedPath ?? 'unsaved'}>
@@ -78,10 +90,24 @@ export default function App() {
         <button onClick={openBoardPicker} style={newProjectStyle}>+ New Project</button>
       </nav>
       <div style={{ flex: 1, minHeight: 0 }}>
-        {mode === 'project' ? <ProjectMode /> : <CatalogEditorMode />}
+        {uiMode === 'beginner' ? <BeginnerMode /> : <ProjectMode />}
       </div>
       {showBoardPicker && <BoardPicker />}
     </div>
+  )
+}
+
+function BeginnerMode() {
+  return (
+    <PanelGroup direction="horizontal" autoSaveId="circuitiny:beginner">
+      <Panel defaultSize={65} minSize={30}>
+        <PaneFrame title="3D Viewer" noPad><Viewer3D /></PaneFrame>
+      </Panel>
+      <ResizeH />
+      <Panel defaultSize={35} minSize={20} maxSize={55}>
+        <PaneFrame title="Agent" noPad><ChatPane /></PaneFrame>
+      </Panel>
+    </PanelGroup>
   )
 }
 
@@ -114,20 +140,6 @@ function ProjectMode() {
       <ResizeH />
       <Panel defaultSize={25} minSize={15} maxSize={40}>
         <PaneFrame title="Agent" noPad><ChatPane /></PaneFrame>
-      </Panel>
-    </PanelGroup>
-  )
-}
-
-function CatalogEditorMode() {
-  return (
-    <PanelGroup direction="horizontal" autoSaveId="circuitiny:editor">
-      <Panel defaultSize={70} minSize={30}>
-        <PaneFrame title="Component Editor — click on the model to add a pin" noPad><CatalogEditor3D /></PaneFrame>
-      </Panel>
-      <ResizeH />
-      <Panel defaultSize={30} minSize={15} maxSize={50}>
-        <PaneFrame title="Pins"><CatalogEditorPanel /></PaneFrame>
       </Panel>
     </PanelGroup>
   )
@@ -180,11 +192,11 @@ function ResizeV() {
   return <PanelResizeHandle style={{ height: 4, background: '#111', cursor: 'row-resize' }} className="resize-v" />
 }
 
-const tabStyle = (active: boolean): React.CSSProperties => ({
-  background: active ? '#2a3140' : 'transparent',
-  color: active ? '#fff' : '#888',
-  border: '1px solid ' + (active ? '#4a90d9' : '#333'),
-  borderRadius: 4, padding: '3px 10px', fontSize: 11, cursor: 'pointer'
+const modeToggleStyle = (mode: UiMode): React.CSSProperties => ({
+  background: mode === 'beginner' ? '#0d2a1a' : 'transparent',
+  color: mode === 'beginner' ? '#7fc97f' : '#888',
+  border: `1px solid ${mode === 'beginner' ? '#2a5a3a' : '#333'}`,
+  borderRadius: 4, padding: '3px 10px', fontSize: 11, cursor: 'pointer',
 })
 
 const actionStyle: React.CSSProperties = {

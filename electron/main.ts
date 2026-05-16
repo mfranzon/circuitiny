@@ -87,6 +87,24 @@ ipcMain.handle('pickComponent', async () => {
   return { jsonPath, json, glbData, glbName }
 })
 
+// In dev __dirname is out/main; in a packaged build, board GLBs are copied into
+// process.resourcesPath via electron-builder's `extraResources`.
+const BOARD_MODELS_DIR = app.isPackaged
+  ? join(process.resourcesPath, 'boards')
+  : join(__dirname, '../../resources/boards')
+
+ipcMain.handle('listBoardModels', async () => {
+  if (!existsSync(BOARD_MODELS_DIR)) return []
+  const files = await readdir(BOARD_MODELS_DIR)
+  const out: Array<{ id: string; data: Uint8Array }> = []
+  for (const f of files) {
+    if (!f.toLowerCase().endsWith('.glb')) continue
+    const id = f.replace(/\.glb$/i, '')
+    out.push({ id, data: new Uint8Array(await readFile(join(BOARD_MODELS_DIR, f))) })
+  }
+  return out
+})
+
 ipcMain.handle('listCatalog', async () => {
   const root = join(CIRCUITINY_HOME, 'catalog')
   if (!existsSync(root)) return []

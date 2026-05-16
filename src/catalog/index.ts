@@ -309,7 +309,7 @@ const xiaoS3: BoardDef = {
   railBudgetMa: { '3v3': 700 },
   pins: [
     // Left edge — USB end first (index 0 = closest to USB = x = -halfX in model space)
-    ...headerPins('left', 0.0105, 0.00875, [
+    ...headerPins('left', 0.00762, 0.00875, [
       { id: 'gpio1',  label: '1',  type: 'analog_in' },   // D0 / A0 / TOUCH1
       { id: 'gpio2',  label: '2',  type: 'analog_in' },   // D1 / A1 / TOUCH2
       { id: 'gpio3',  label: '3',  type: 'analog_in' },   // D2 / A2 / TOUCH3
@@ -319,7 +319,7 @@ const xiaoS3: BoardDef = {
       { id: 'gpio43', label: '43', type: 'uart_tx'   },   // D6 / TX
     ]),
     // Right edge — USB end first
-    ...headerPins('right', 0.0105, 0.00875, [
+    ...headerPins('right', 0.00762, 0.00875, [
       { id: '5v0',    label: '5V',  type: 'power_in'  },  // 5V
       { id: 'gnd',    label: 'GND', type: 'ground'    },  // GND
       { id: '3v3',    label: '3V3', type: 'power_out' },  // 3V3
@@ -456,6 +456,10 @@ export const catalog = {
       const buf = glbData.slice().buffer as ArrayBuffer
       glbBlobs[def.id] = URL.createObjectURL(new Blob([buf], { type: 'model/gltf-binary' }))
     }
+  },
+  registerBoardGlb: (id: string, glbData: Uint8Array) => {
+    const buf = glbData.slice().buffer as ArrayBuffer
+    glbBlobs[id] = URL.createObjectURL(new Blob([buf], { type: 'model/gltf-binary' }))
   }
 }
 

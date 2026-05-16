@@ -1,35 +1,9 @@
 import { create } from 'zustand'
-import { type Project, emptyProject, type PinType } from './project/schema'
-import { catalog } from './catalog'
-
-export type Mode = 'project' | 'catalog-editor'
-
-export interface DraftPin {
-  id: string
-  label: string
-  type: PinType
-  position: [number, number, number]   // world coords (meters), captured post-scale
-  normal: [number, number, number]
-}
-
-export type Category = 'sensor' | 'actuator' | 'display' | 'input' | 'power' | 'misc'
-
-export interface CatalogDraft {
-  id: string
-  name: string
-  category: Category
-  glbPath: string | null
-  glbName: string | null
-  glbData: Uint8Array | null
-  scale: number                         // applied to model and pin coords
-  pins: DraftPin[]
-  selectedPin: string | null
-}
+import { type Project, emptyProject } from './project/schema'
 
 export type PinRef = string  // "instance.pinId" or "board.pinId"
 
 interface State {
-  mode: Mode
   project: Project
   past: Project[]
   future: Project[]
@@ -50,9 +24,7 @@ interface State {
   nativeCompileError: string | null
   nativeBinaryPath: string | null
   nativeRunId: string | null
-  draft: CatalogDraft
 
-  setMode: (m: Mode) => void
   setProject: (p: Project) => void
   loadProject: (p: Project, path?: string) => void
   markSaved: (path: string) => void
@@ -79,22 +51,7 @@ interface State {
   setNativeRunId: (id: string | null) => void
 
   setCustomCode: (file: string, code: string) => void
-
-  loadDraftGlb: (path: string, name: string, data: Uint8Array, suggestedScale?: number) => void
-  setDraftMeta: (patch: Partial<Pick<CatalogDraft, 'id' | 'name' | 'category' | 'scale'>>) => void
-  loadDraftFromBundle: (d: Partial<CatalogDraft>) => void
-  addDraftPin: (position: [number, number, number], normal: [number, number, number]) => void
-  updateDraftPin: (id: string, patch: Partial<DraftPin>) => void
-  removeDraftPin: (id: string) => void
-  selectDraftPin: (id: string | null) => void
-  resetDraft: () => void
 }
-
-const newDraft = (): CatalogDraft => ({
-  id: '', name: '', category: 'sensor',
-  glbPath: null, glbName: null, glbData: null,
-  scale: 1, pins: [], selectedPin: null
-})
 
 // Push current project onto the undo stack before a circuit mutation.
 function snapshot(s: State) {
@@ -102,7 +59,6 @@ function snapshot(s: State) {
 }
 
 export const useStore = create<State>((set) => ({
-  mode: 'project',
   project: seed(),
   past: [],
   future: [],
@@ -123,14 +79,12 @@ export const useStore = create<State>((set) => ({
   nativeCompileError: null,
   nativeBinaryPath: null,
   nativeRunId: null,
-  draft: newDraft(),
 
-  setMode: (mode) => set({ mode }),
   setProject: (project) => set({ project, dirty: true }),
   loadProject: (project, path) => set({
     project, savedPath: path ?? null, dirty: false,
     past: [], future: [],
-    mode: 'project', selected: null, pendingPin: null,
+    selected: null, pendingPin: null,
     simulating: false, simTime: 0, simGpios: {}, simStrips: {}, simLog: [], pendingEdges: []
   }),
   markSaved: (savedPath) => set({ savedPath, dirty: false }),
@@ -257,30 +211,6 @@ export const useStore = create<State>((set) => ({
       dirty: true,
     }
   }),
-
-  loadDraftGlb: (glbPath, glbName, glbData, suggestedScale) =>
-    set((s) => ({ draft: { ...s.draft, glbPath, glbName, glbData,
-                           scale: suggestedScale ?? s.draft.scale } })),
-  setDraftMeta: (patch) => set((s) => ({ draft: { ...s.draft, ...patch } })),
-  loadDraftFromBundle: (d) => set((s) => ({ draft: { ...newDraft(), ...d } })),
-  addDraftPin: (position, normal) =>
-    set((s) => {
-      const id = `pin${s.draft.pins.length + 1}`
-      const pin: DraftPin = { id, label: id, type: 'digital_io', position, normal }
-      return { draft: { ...s.draft, pins: [...s.draft.pins, pin], selectedPin: id } }
-    }),
-  updateDraftPin: (id, patch) =>
-    set((s) => ({
-      draft: { ...s.draft, pins: s.draft.pins.map((p) => p.id === id ? { ...p, ...patch } : p) }
-    })),
-  removeDraftPin: (id) =>
-    set((s) => ({
-      draft: { ...s.draft, pins: s.draft.pins.filter((p) => p.id !== id),
-               selectedPin: s.draft.selectedPin === id ? null : s.draft.selectedPin }
-    })),
-  selectDraftPin: (selectedPin) =>
-    set((s) => ({ draft: { ...s.draft, selectedPin } })),
-  resetDraft: () => set({ draft: newDraft() })
 }))
 
 function seed(): Project {

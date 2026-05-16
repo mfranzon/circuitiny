@@ -35,6 +35,13 @@
       "out/**/*",
       "node_modules/node-pty/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "resources/boards",
+        "to": "boards",
+        "filter": ["**/*.glb"]
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "resources/icon.icns",

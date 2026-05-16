@@ -103,7 +103,7 @@ function BoardWithPins() {
   const glbUrl = catalog.getGlbUrl(board.id)
   return (
     <group>
-      {glbUrl ? <LoadedGlb url={glbUrl} /> : <BoardMesh board={board} />}
+      {glbUrl ? <LoadedGlb url={glbUrl} scale={board.scale ?? 1} isBoard /> : <BoardMesh board={board} />}
       {board.pins.map((p) => {
         const ref = `board.${p.id}`
         const isPending = pendingPin === ref
@@ -127,8 +127,8 @@ const LED_GLB_GLOW: Record<string, { emissive: string; light: string }> = {
   'led-5mm-yellow': { emissive: '#ffdd00', light: '#ffee44' },
 }
 
-function LoadedGlb({ url, scale = 1, lit, simActive, componentId }: {
-  url: string; scale?: number; lit?: boolean; simActive?: boolean; componentId?: string
+function LoadedGlb({ url, scale = 1, lit, simActive, componentId, isBoard }: {
+  url: string; scale?: number; lit?: boolean; simActive?: boolean; componentId?: string; isBoard?: boolean
 }) {
   const gltf = useGLTF(url)
   const scene = useMemo(() => gltf.scene.clone(true), [gltf])
@@ -138,6 +138,14 @@ function LoadedGlb({ url, scale = 1, lit, simActive, componentId }: {
   useEffect(() => {
     scene.traverse((child) => {
       if (child instanceof THREE.Mesh) {
+        // Board GLBs (build123d STEP exports) ship without materials, so
+        // GLTFLoader assigns a default white MeshStandardMaterial. Replace
+        // it with a dark PCB-green so the board doesn't render as a blob.
+        if (isBoard) {
+          child.material = new THREE.MeshStandardMaterial({
+            color: '#143018', roughness: 0.7, metalness: 0.1,
+          })
+        }
         const mat = child.material as THREE.MeshStandardMaterial
         if (!mat) return
         if (lit) {

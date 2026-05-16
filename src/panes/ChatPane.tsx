@@ -16,6 +16,27 @@ const STARTER_PROMPTS = [
   'Build a traffic light with red, yellow, and green LEDs',
 ]
 
+// Map raw tool names to plain-English summaries shown to newbies in the chat.
+function describeToolCall(name: string, args: Record<string, unknown> | undefined): string {
+  const a = args ?? {}
+  switch (name) {
+    case 'add_component':    return `Adding component ${a.componentId ?? ''}`
+    case 'remove_component': return `Removing ${a.instance ?? 'component'}`
+    case 'connect':          return `Wiring ${a.a ?? '?'} → ${a.b ?? '?'}`
+    case 'remove_net':       return `Removing wire ${a.netId ?? ''}`
+    case 'run_drc':          return 'Checking circuit for errors'
+    case 'get_project':      return 'Looking at the current circuit'
+    case 'list_catalog':     return 'Browsing available parts'
+    case 'list_glb_models':  return 'Browsing 3D models'
+    case 'read_firmware':    return 'Reading the firmware'
+    case 'write_firmware':   return `Writing firmware (${a.file ?? ''})`
+    case 'save_project':     return 'Saving the project'
+    case 'plan_circuit':     return 'Planning the circuit'
+    case 'fetch_url':        return `Fetching ${a.url ?? 'a reference'}`
+    default:                 return name
+  }
+}
+
 function loadCfg() {
   try { return JSON.parse(localStorage.getItem(LS_KEY) ?? '{}') } catch { return {} }
 }
@@ -380,8 +401,12 @@ function Message({ m }: { m: Msg }) {
           </div>
         )}
         {otherCalls.length > 0 && (
-          <div style={{ color: '#d0b3ff' }}>
-            → calling {otherCalls.map((c) => c.function.name).join(', ')}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {otherCalls.map((c, n) => (
+              <div key={n} style={{ color: '#d0b3ff' }}>
+                → {describeToolCall(c.function.name, c.function.arguments as Record<string, unknown> | undefined)}
+              </div>
+            ))}
           </div>
         )}
       </div>

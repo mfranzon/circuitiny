@@ -12,6 +12,8 @@ const api = {
     ipcRenderer.invoke('writeBundle', id, glbName, glbData, jsonText),
   listCatalog: (): Promise<Array<{ id: string; json: any; glbData: Uint8Array | null }>> =>
     ipcRenderer.invoke('listCatalog'),
+  listBoardModels: (): Promise<Array<{ id: string; data: Uint8Array }>> =>
+    ipcRenderer.invoke('listBoardModels'),
 
   saveProject: (project: unknown, suggestedName: string, existingPath?: string): Promise<string | null> =>
     ipcRenderer.invoke('saveProject', project, suggestedName, existingPath),
