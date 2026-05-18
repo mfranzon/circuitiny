@@ -132,7 +132,7 @@ function LoadedGlb({ url, scale = 1, lit, simActive, componentId, isBoard }: {
 }) {
   const gltf = useGLTF(url)
   const scene = useMemo(() => gltf.scene.clone(true), [gltf])
-  const glow = (componentId && LED_GLB_GLOW[componentId]) ?? { emissive: '#ff2200', light: '#ff4400' }
+  const glow = (componentId ? LED_GLB_GLOW[componentId] : undefined) ?? { emissive: '#ff2200', light: '#ff4400' }
 
   // Apply emissive tint to all meshes when lit or active.
   useEffect(() => {

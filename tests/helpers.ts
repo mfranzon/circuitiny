@@ -1,6 +1,6 @@
 // Shared project builder for tests — keeps test bodies short.
 
-import type { Project, Net, Behavior } from '../src/project/schema'
+import type { Project } from '../src/project/schema'
 
 export function makeProject(overrides: Partial<Project> = {}): Project {
   return {
@@ -10,7 +10,6 @@ export function makeProject(overrides: Partial<Project> = {}): Project {
     board: 'esp32-devkitc-v4',
     components: [],
     nets: [],
-    behaviors: [],
     app: { wifi: { enabled: false }, log_level: 'info' },
     ...overrides,
   }

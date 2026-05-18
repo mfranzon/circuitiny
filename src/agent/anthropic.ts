@@ -75,12 +75,32 @@ export async function chatAnthropic(
   const signal = cfg.signal
   const execCtx = makeExecContext(signal)
 
+  // Watchdog timeouts so a stalled API call ends instead of hanging forever.
+  // CONNECT: max wait for response headers. IDLE: max gap between stream chunks
+  // (re-armed on every chunk, so legitimately long generations are fine).
+  const CONNECT_MS = cfg.connectTimeoutMs ?? 90_000
+  const IDLE_MS = cfg.idleTimeoutMs ?? 120_000
+
   for (let loop = 0; loop < maxLoops; loop++) {
     if (signal?.aborted) { cb.onError('aborted'); return }
     const { system, messages } = toAnthropicMessages(trimConvForApi(conv))
 
+    // Per-request controller: aborted by the user's signal OR the watchdog.
+    const ctl = new AbortController()
+    let timedOut: string | null = null
+    const onUserAbort = () => ctl.abort()
+    if (signal) signal.addEventListener('abort', onUserAbort, { once: true })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const arm = (ms: number, reason: string) => {
+      clearTimeout(timer)
+      timer = setTimeout(() => { timedOut = reason; ctl.abort() }, ms)
+    }
+    const disarm = () => clearTimeout(timer)
+    const cleanup = () => { disarm(); signal?.removeEventListener('abort', onUserAbort) }
+
     let resp: Response
     try {
+      arm(CONNECT_MS, `no response from API within ${CONNECT_MS / 1000}s`)
       resp = await fetch(`${baseUrl}/v1/messages`, {
         method: 'POST',
         headers: {
@@ -98,17 +118,22 @@ export async function chatAnthropic(
           tools: anthropicTools,
           stream: true,
         }),
-        signal,
+        signal: ctl.signal,
       })
     } catch (e: any) {
+      cleanup()
+      if (timedOut) { cb.onError(`Anthropic timeout: ${timedOut}`); return }
       if (signal?.aborted || e?.name === 'AbortError') { cb.onError('aborted'); return }
       cb.onError(`Anthropic fetch error: ${e?.message ?? String(e)}`)
       return
     }
     if (!resp.ok || !resp.body) {
+      cleanup()
       cb.onError(`Anthropic error ${resp.status}: ${await resp.text().catch(() => '')}`)
       return
     }
+    // Headers arrived; switch from connect timeout to inter-chunk idle timeout.
+    arm(IDLE_MS, `stream stalled (no data for ${IDLE_MS / 1000}s)`)
 
     const reader = resp.body.getReader()
     const decoder = new TextDecoder()
@@ -121,6 +146,7 @@ export async function chatAnthropic(
     outer: while (true) {
       const { done, value } = await reader.read()
       if (done) break
+      arm(IDLE_MS, `stream stalled (no data for ${IDLE_MS / 1000}s)`)
       buf += decoder.decode(value, { stream: true })
       let nl: number
       while ((nl = buf.indexOf('\n')) >= 0) {
@@ -135,6 +161,9 @@ export async function chatAnthropic(
           const blk = ev.content_block
           if (blk.type === 'tool_use') {
             toolBlocks[ev.index] = { id: blk.id, name: blk.name, args: '' }
+            cb.onProgress?.(blk.name)  // tool args may stream for minutes
+          } else if (blk.type === 'text') {
+            cb.onProgress?.('__text__')
           }
         } else if (ev.type === 'content_block_delta') {
           const d = ev.delta
@@ -149,10 +178,13 @@ export async function chatAnthropic(
       }
     }
     } catch (e: any) {
+      cleanup()
+      if (timedOut) { cb.onError(`Anthropic timeout: ${timedOut}`); return }
       if (signal?.aborted || e?.name === 'AbortError') { cb.onError('aborted'); return }
       cb.onError(`Anthropic stream error: ${e?.message ?? String(e)}`)
       return
     }
+    cleanup()  // stream done; tool execution below is not watchdog-timed
 
     const toolCalls = Object.values(toolBlocks).length > 0
       ? Object.values(toolBlocks).map((tb) => ({

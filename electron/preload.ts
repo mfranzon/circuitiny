@@ -62,6 +62,7 @@ const api = {
     prompt: string
     systemAppend: string
     model: string
+    timeoutMs?: number
   }): Promise<{ ok: boolean; text?: string; error?: string }> =>
     ipcRenderer.invoke('claudeCodeChat', opts),
 }

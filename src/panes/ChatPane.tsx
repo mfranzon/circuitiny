@@ -115,9 +115,21 @@ export default function ChatPane() {
   const [msgs, setMsgs]   = useState<DisplayMsg[]>(() => loadChatHistory(projectName))
   const [input, setInput] = useState('')
   const [busy, setBusy]   = useState(false)
+  const [status, setStatus] = useState('')   // current tool activity, shown while busy
+  const [elapsed, setElapsed] = useState(0)  // seconds since the request started
   const scroller          = useRef<HTMLDivElement>(null)
   const streamSid         = useRef<string | null>(null)   // set in onToken body, not inside updater
   const abortRef          = useRef<AbortController | null>(null)
+
+  // Tick an elapsed-seconds counter while a request is in flight, so the user
+  // can tell the agent is alive (vs hung) during silent tool/reasoning loops.
+  useEffect(() => {
+    if (!busy) { setElapsed(0); return }
+    const t0 = Date.now()
+    setElapsed(0)
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [busy])
 
   // Load history when project switches
   useEffect(() => {
@@ -184,6 +196,7 @@ export default function ChatPane() {
     if (!text || busy) return
     setInput('')
     setBusy(true)
+    setStatus('starting…')
     // Strip internal _sid markers before sending history to the model.
     const hist: Msg[] = msgs.map(({ _sid: _, ...m }) => m)
     streamSid.current = null
@@ -219,7 +232,10 @@ export default function ChatPane() {
             return [...prev, m]
           })
         },
-        onToolCall: () => {},
+        onToolCall: (name, args) => setStatus(describeToolCall(name, args as Record<string, unknown> | undefined)),
+        onProgress: (label) => setStatus(
+          label === '__text__' ? 'writing response…' : describeToolCall(label, undefined),
+        ),
         onError: (err) => setMsgs((prev) => [
           ...prev,
           { role: 'assistant', content: err === 'aborted' ? '⏸ stopped' : `⚠ ${err}` },
@@ -335,7 +351,14 @@ export default function ChatPane() {
           )
         )}
         {msgs.map((m, i) => <Message key={i} m={m} />)}
-        {busy && <div style={{ color: '#888', fontStyle: 'italic' }}>thinking…</div>}
+        {busy && (
+          <div style={{ color: '#888', fontStyle: 'italic' }}>
+            {status || 'thinking…'}
+            {' '}<span style={{ color: '#666', fontStyle: 'normal' }}>
+              ({Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')})
+            </span>
+          </div>
+        )}
       </div>
 
       {/* ── input bar ── */}

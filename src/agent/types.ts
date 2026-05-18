@@ -12,6 +12,10 @@ export interface AgentCallbacks {
   onToken: (delta: string) => void
   onToolCall: (name: string, args: any, result: any) => void
   onError: (err: string) => void
+  // Optional: fine-grained activity while a single message is still streaming
+  // (e.g. the model is emitting a large tool_use block). Lets the UI show that
+  // work is happening before the message/tool result is complete.
+  onProgress?: (label: string) => void
 }
 
 export type ProviderType = 'ollama' | 'openai' | 'anthropic' | 'openrouter' | 'claudecode'
@@ -24,6 +28,8 @@ export interface ProviderConfig {
   maxToolLoops?: number
   expertMode?: boolean
   signal?: AbortSignal
+  connectTimeoutMs?: number  // max wait for API response headers (default 90s)
+  idleTimeoutMs?: number     // max gap between stream chunks (default 120s)
 }
 
 export const PROVIDER_DEFAULTS: Record<ProviderType, { label: string; defaultModel: string; baseUrl: string; needsKey: boolean }> = {

@@ -32,11 +32,10 @@ describe('emptyProject', () => {
     expect(p.target).toBe('esp32')
   })
 
-  it('initialises with empty components, nets, behaviors', () => {
+  it('initialises with empty components and nets', () => {
     const p = emptyProject('my-project')
     expect(p.components).toHaveLength(0)
     expect(p.nets).toHaveLength(0)
-    expect(p.behaviors).toHaveLength(0)
   })
 
   it('sets schemaVersion to 1', () => {

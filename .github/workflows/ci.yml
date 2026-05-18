@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # node-pty's postinstall electron-rebuild is only needed at Electron
+      # runtime; typecheck and tests run on src/ alone, so skip native scripts
+      # to keep CI fast and deterministic.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - run: pnpm typecheck
+
+      - run: pnpm test

@@ -344,6 +344,7 @@ ipcMain.handle('claudeCodeChat', async (_e, opts: {
   prompt: string
   systemAppend: string
   model: string
+  timeoutMs?: number
 }): Promise<{ ok: boolean; text?: string; error?: string }> => {
   const claudePath = join(homedir(), '.local', 'bin', 'claude')
   const binary = existsSync(claudePath) ? claudePath : 'claude'
@@ -355,6 +356,11 @@ ipcMain.handle('claudeCodeChat', async (_e, opts: {
       '--no-session-persistence',
       '--output-format', 'text',
       '--model', opts.model || 'sonnet',
+      // Disable every built-in CLI tool (Read/Bash/Edit/…). Otherwise the model
+      // uses its native tools (or just talks) and never emits the text-based
+      // <tool_call> protocol that claudecode.ts parses. With no native tools,
+      // the protocol is the only way it can act.
+      '--tools', '',
       '--append-system-prompt', opts.systemAppend,
     ]
 
@@ -364,6 +370,21 @@ ipcMain.handle('claudeCodeChat', async (_e, opts: {
 
     let stdout = ''
     let stderr = ''
+    let settled = false
+    const done = (r: { ok: boolean; text?: string; error?: string }) => {
+      if (settled) return
+      settled = true
+      clearTimeout(killTimer)
+      resolve(r)
+    }
+
+    // Hard per-turn timeout so a hung `claude` CLI cannot block the agent loop
+    // forever. There is no streaming here; each turn is one-shot.
+    const timeoutMs = opts.timeoutMs ?? 240_000
+    const killTimer = setTimeout(() => {
+      child.kill('SIGKILL')
+      done({ ok: false, error: `claude CLI timed out after ${timeoutMs / 1000}s` })
+    }, timeoutMs)
 
     child.stdout?.on('data', (d: Buffer) => { stdout += d.toString('utf8') })
     child.stderr?.on('data', (d: Buffer) => { stderr += d.toString('utf8') })
@@ -373,13 +394,13 @@ ipcMain.handle('claudeCodeChat', async (_e, opts: {
 
     child.on('exit', (code) => {
       if (code === 0) {
-        resolve({ ok: true, text: stdout })
+        done({ ok: true, text: stdout })
       } else {
-        resolve({ ok: false, error: stderr.trim() || `claude exited with code ${code}` })
+        done({ ok: false, error: stderr.trim() || `claude exited with code ${code}` })
       }
     })
     child.on('error', (err) => {
-      resolve({ ok: false, error: err.message })
+      done({ ok: false, error: err.message })
     })
   })
 })
@@ -438,7 +459,7 @@ app.on('before-quit', () => {
 })
 
 app.whenReady().then(() => {
-  if (process.platform === 'darwin') app.dock.setIcon(ICON_PATH)
+  if (process.platform === 'darwin') app.dock?.setIcon(ICON_PATH)
   createWindow()
 })
 

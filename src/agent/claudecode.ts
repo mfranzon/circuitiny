@@ -94,6 +94,7 @@ export async function chatClaudeCode(
       prompt: formatConversation(conv),
       systemAppend: TOOL_PROTOCOL,
       model: cfg.model,
+      timeoutMs: cfg.idleTimeoutMs,
     })
 
     if (signal?.aborted) { cb.onError('aborted'); return }
@@ -124,9 +125,16 @@ export async function chatClaudeCode(
 
     if (!toolCalls.length) return
 
+    // The CLI tends to emit a whole plan as one batch instead of stopping after
+    // the first call. If a critical tool (e.g. plan_circuit with bad IDs) fails,
+    // skip the rest so the next turn confronts the error instead of running a
+    // cascade of doomed connects against components that were never added.
+    execCtx.abortBatch = false
     for (const [i, call] of toolCalls.entries()) {
       if (signal?.aborted) { cb.onError('aborted'); return }
-      const toolResult = await execTool(call.name, call.args, execCtx)
+      const toolResult = execCtx.abortBatch
+        ? { ok: false as const, error: 'Skipped: a previous step in this batch failed. Fix the errors above and try again.' }
+        : await execTool(call.name, call.args, execCtx)
       cb.onToolCall(call.name, call.args, toolResult)
       const toolMsg: Msg = {
         role: 'tool',
