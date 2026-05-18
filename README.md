@@ -23,9 +23,7 @@ A local-first, AI-assisted circuit design tool for your projects. Wire component
 8. [Using the agent](#using-the-agent)
    - [Agent tools reference](#agent-tools-reference)
    - [Prompting tips](#prompting-tips)
-9. [Behaviors DSL](#behaviors-dsl)
-   - [Triggers](#triggers)
-   - [Actions](#actions)
+9. [Firmware](#firmware)
 10. [Firmware simulation](#firmware-simulation)
 11. [Code generation](#code-generation)
 12. [Build and flash](#build-and-flash)
@@ -38,9 +36,9 @@ A local-first, AI-assisted circuit design tool for your projects. Wire component
 ## Features
 
 - **3D circuit view** , drag components onto the board, click pins to wire them, inspect nets in real time
-- **AI agent** , describe a circuit in plain English; the agent adds components, wires them, runs DRC, and writes firmware
-- **Firmware simulation** , behaviors defined by the agent run in the browser; GPIO outputs animate instantly with no hardware required
-- **Code generation** , a complete ESP-IDF 5 C project (app_main.c, CMakeLists.txt, sdkconfig.defaults) is generated live from the project state
+- **AI agent** , describe a circuit in plain English; the agent plans the BOM, adds components, wires them, runs DRC, and writes firmware
+- **Firmware simulation** , the generated (or agent-written) firmware is compiled to a native binary and run on your machine; GPIO outputs animate in the 3D view and logs stream live, with no hardware required
+- **Code generation** , a complete ESP-IDF 5 C project (app_main.c, CMakeLists.txt, sdkconfig.defaults) is generated live from the circuit, or replaced wholesale by agent-written firmware
 - **Build and flash** , one-click `idf.py build`, `idf.py flash`, and serial monitor, all streamed inside the app
 - **Extensible catalog** , drop a `component.json` + `.glb` folder into `~/.circuitiny/catalog/` to add any component to the palette
 - **Multi-board** , ESP32-DevKitC v4, ESP32-S3-DevKitC-1, ESP32-C3-DevKitM-1, ESP32-C6-DevKitC-1, XIAO ESP32-S3
@@ -92,8 +90,8 @@ pnpm build
 │  Circuitiny     [Project]  [Catalog Editor]              myproject ●  [Open] [Save]  [+ New] │
 ├──────────┬──────────────────────────────────┬────────────────────┬──────────┤
 │          │                                  │                    │          │
-│ Palette  │         3D Viewer                │ Schematic /        │  Agent   │
-│          │                                  │ Behaviors          │          │
+│ Palette  │         3D Viewer                │ Schematic          │  Agent   │
+│          │                                  │                    │          │
 │ (catalog │   ● sim badge when running       │                    │  chat    │
 │  list)   │                                  │                    │  window  │
 │          ├──────────────────────────────────┤                    │          │
@@ -105,12 +103,12 @@ pnpm build
 | Pane | Purpose |
 |---|---|
 | **Palette** | Browse catalog components; click to add to the project |
-| **3D Viewer** | Place and wire components; drag to reposition; click pins to connect |
-| **Schematic / Behaviors** | Schematic view of the circuit; Behaviors tab to edit the firmware DSL |
+| **3D Viewer** | Place and wire components; drag to reposition; click pins to connect; click input components during simulation |
+| **Schematic** | 2D schematic view of the circuit |
 | **Code** | Live-generated ESP-IDF C code; agent-written files shown with an `agent` badge |
 | **Build / Flash** | Run `idf.py build`, flash to device, open serial monitor |
-| **Sim** | Play/Stop/Reset simulation; speed control; real-time GPIO log |
-| **Agent** | Chat with the AI agent; supports Anthropic Claude, OpenAI, and local Ollama models |
+| **Sim** | Compile the firmware to a native binary, then Play/Stop it; real-time GPIO log |
+| **Agent** | Chat with the AI agent; supports Anthropic Claude, Claude Code, OpenAI, OpenRouter, and local Ollama models |
 
 ---
 
@@ -361,8 +359,10 @@ Open the **Agent** pane on the right. Select a model provider and key in the set
 
 | Provider | Setup |
 |---|---|
-| **Anthropic Claude** | Paste your API key in settings. Recommended: `claude-sonnet-4-5` or later. |
-| **OpenAI** | Paste your API key. Works with `gpt-4o` and `o3`. |
+| **Anthropic Claude** | Paste your API key in settings. Recommended: `claude-sonnet-4-6` or later. |
+| **Claude Code** | Uses your local Claude Code CLI (no API key in-app). Models: `sonnet`, `opus`, `haiku`. |
+| **OpenAI** | Paste your API key. Works with `gpt-4o` and later. |
+| **OpenRouter** | Paste your OpenRouter API key. Routes to Claude, GPT, Llama, Gemini, etc. |
 | **Ollama** | Run `ollama serve` locally. Select any pulled model. No API key needed. |
 
 ### Agent tools reference
@@ -371,20 +371,20 @@ The agent has access to the following tools. You can reference these in prompts 
 
 | Tool | What it does |
 |---|---|
-| `get_project` | Returns board, component list, net list, behaviors, DRC status |
+| `get_project` | Returns board, component list, net list, DRC status, and custom firmware file names |
 | `list_catalog` | Lists all components with ids, names, categories, and pin ids |
+| `plan_circuit` | Pre-flight check: validates component ids, flags missing companion parts, returns safe GPIOs. Must be called before the first `add_component` |
 | `add_component` | Adds a component instance to the project |
-| `remove_component` | Removes an instance and its nets |
+| `remove_component` | Removes an instance and any nets touching it |
+| `remove_net` | Removes a single net (wire) by id |
 | `connect` | Wires two pins together (`"led1.anode"` → `"board.gpio16"`) |
 | `run_drc` | Runs design rule checks; returns errors and warnings |
-| `set_behavior` | Creates or replaces a firmware behavior (trigger + actions) |
-| `remove_behavior` | Removes a behavior by id |
-| `write_firmware` | Writes raw C code into `main/app_main.c` (bypasses behavior DSL) |
+| `write_firmware` | Writes full ESP-IDF C source into a project file (e.g. `main/app_main.c`); overrides the generated code |
 | `read_firmware` | Reads back a previously written firmware file |
 | `save_project` | Saves the project to disk (overwrites if previously saved, else opens dialog) |
 | `think` | Private reasoning step , no side effects |
 | `fetch_url` | Fetches a URL and returns readable text (for datasheets, docs) |
-| `list_glb_models` | Lists all registered GLB models |
+| `list_glb_models` | Lists all registered GLB models (boards and catalog components) |
 
 ### Prompting tips
 
@@ -394,10 +394,11 @@ The agent has access to the following tools. You can reference these in prompts 
 **The agent follows a fixed workflow:**
 1. `think` to plan the BOM and wiring
 2. `list_catalog` to check available components
-3. `add_component` + `connect` for each component
-4. `run_drc` after every wire
-5. `set_behavior` for each firmware behavior
-6. Summarises and tells you to click ▶ Play
+3. `plan_circuit` to validate ids and get safe GPIOs (required before `add_component`)
+4. `add_component` + `connect` for each component
+5. `run_drc` after every wire
+6. `write_firmware` to write the ESP-IDF C application
+7. Summarises and tells you to Compile then click ▶ Play
 
 **Iterate freely:**
 > "The LED should also blink at 2Hz when not pressed."
@@ -407,72 +408,38 @@ The agent has access to the following tools. You can reference these in prompts 
 
 ---
 
-## Behaviors DSL
+## Firmware
 
-Behaviors are the single source of truth for firmware logic. They drive **both** the in-app simulator and the generated C code.
+There is no behavior DSL. Firmware is plain ESP-IDF C, and it comes from one of two places:
 
-A behavior has one trigger and a list of actions:
+1. **Generated from the circuit** , the code generator turns the components and nets into a working ESP-IDF project: GPIO/I2C initialisation, pin macros, and board-specific `sdkconfig`. This is always available and updates live as you edit the circuit. See [Code generation](#code-generation).
 
-```jsonc
-{
-  "id": "blink",
-  "trigger": { "type": "timer", "period_ms": 500 },
-  "actions": [
-    { "type": "toggle", "target": "led1.anode" }
-  ]
-}
-```
+2. **Written by the agent** , when you ask the agent for logic ("blink the LED at 2 Hz", "turn the LED on while the button is held"), it calls `write_firmware` with complete C source. Agent-written files are stored in the project's `customCode` and **override** the generated file of the same path (e.g. `main/app_main.c`). They appear in the Code pane with an `agent` badge. Use `read_firmware` to inspect them; delete the custom file to fall back to generated code.
 
-Edit behaviors manually in the **Behaviors** tab, or let the agent write them with `set_behavior`.
-
-### Triggers
-
-| Type | Required fields | When it fires |
-|---|---|---|
-| `boot` | , | Once at startup |
-| `timer` | `period_ms` | Every N milliseconds |
-| `gpio_edge` | `source`, `edge` | When a pin changes (`rising` / `falling` / `both`) |
-| `wifi_connected` | , | When the device connects to Wi-Fi |
-
-`source` for `gpio_edge` is a **pin ref**: `"instance.pinId"` (e.g. `"btn1.a"`) or `"board.pinId"` (e.g. `"board.gpio4"`).
-
-### Actions
-
-| Type | Required fields | What it does |
-|---|---|---|
-| `set_output` | `target`, `value` (`"on"` / `"off"`) | Drive a GPIO high or low |
-| `toggle` | `target` | Flip a GPIO |
-| `log` | `level`, `message` | Print to the sim console / serial monitor |
-| `delay` | `ms` | Wait (approximated in simulator) |
-| `sequence` | `actions` | Run a sub-list of actions in order |
-
-`target` is a pin ref pointing at the component pin or board pin to drive.
-
-**Pin refs** always follow the format `"instance.pinId"` , not raw GPIO numbers. The sim and codegen resolve the actual GPIO number from the net connections.
+Pin references the agent reasons about follow the format `"instance.pinId"` (e.g. `"led1.anode"`, `"board.gpio4"`); the resolver traces nets to the real GPIO number when emitting C.
 
 ---
 
 ## Firmware simulation
 
-Click **▶ Play** in the **Sim** tab (Code/Build/Sim panel) to start the simulator.
+The simulator runs your **actual firmware** , not an interpretation of it. The C project (generated or agent-written) is compiled to a small native host binary that emulates the ESP GPIO/log API, so what you see is the real control flow.
 
-The simulator evaluates your behaviors in JavaScript at up to 10× speed:
+In the **Sim** tab (Code/Build/Sim panel):
 
-- **Timer triggers** fire when the simulated clock crosses a period boundary
-- **gpio_edge triggers** fire when a button or input component is clicked in the 3D view
-- **GPIO outputs** animate immediately , LEDs glow, relays activate, WS2812B strips light up
-- **Log actions** print to the Sim console
+1. **⬡ Compile** , compiles the current firmware to a native binary. The button shows `⟳ Compiling…`, then `✓ Compiled` (or `✗ Error` with the compiler output in the log).
+2. **▶ Play** , runs the binary. GPIO writes stream out as JSON events and drive the 3D view; `ESP_LOGx` output appears in the Sim console.
+3. **■ Stop** , terminates the running binary.
+
+Recompile after changing the circuit or firmware , Play uses the last compiled binary.
+
+**GPIO outputs** animate live: LEDs glow, relays activate, WS2812B strips light up.
 
 **Interacting during simulation:**
 
 - Components with `sim.role: "button"` or `"generic_input"` show a blue highlight ring
-- Click and hold a button → `rising` edge fires → LED turns on
-- Release → `falling` edge fires → LED turns off
-- Rapid clicks each fire their own edge (no debounce in sim v0)
-
-**Speed control:** 1×, 2×, 5×, 10× , adjusts how fast simulated time advances relative to wall time.
-
-The sim stops automatically if DRC errors appear while it's running.
+- Click and hold a button , a rising edge is injected into the binary's input
+- Release , a falling edge is injected
+- Rapid clicks each inject their own edge (no debounce)
 
 ---
 
@@ -482,18 +449,18 @@ The **Code** tab shows a live-generated ESP-IDF 5 project, updated as you edit t
 
 | File | Contents |
 |---|---|
-| `main/app_main.c` | Includes, GPIO init, behavior tasks, `app_main` |
+| `main/app_main.c` | Includes, pin macros, GPIO/I2C init, `app_main` |
 | `main/CMakeLists.txt` | `idf_component_register` with all required IDF components |
 | `sdkconfig.defaults` | `CONFIG_IDF_TARGET`, FreeRTOS Hz, CPU frequency, USB CDC (board-specific) |
 
 The code generator covers:
-- GPIO output/input init from net connections
+- `#define PIN_<instance>_<pin>` macros resolved from net connections to real GPIO numbers
+- GPIO direction setup per pin (`gpio_set_direction` input vs output, inferred from pin type)
 - I2C bus init (when I2C components are present)
-- `xTaskCreate` / `vTaskDelayUntil` for `timer` behaviors
-- `gpio_set_level` / `gpio_set_direction` for `set_output` and `toggle` actions
-- `ESP_LOGI/W/E` for `log` actions
+- Board-specific `sdkconfig.defaults` (target, CPU frequency, USB CDC)
+- Wi-Fi / MQTT / HTTP include and `REQUIRES` scaffolding when enabled in the project's `app` config
 
-If the agent writes raw firmware via `write_firmware`, those files appear as additional tabs in the Code pane with an `agent` badge and override the generated output.
+The generated `app_main` initialises hardware but contains no application logic , that is the agent's job via `write_firmware`. If a custom file exists for a given path, it replaces the generated one in the Code pane (shown with an `agent` badge) and is what gets compiled, simulated, and flashed.
 
 ---
 
@@ -546,22 +513,18 @@ Projects are saved as `.circuitiny.json`. The format is stable and human-readabl
     { "id": "net3", "endpoints": ["led1.cathode", "board.gnd_l"] }
   ],
 
-  "behaviors": [
-    {
-      "id": "blink",
-      "trigger": { "type": "timer", "period_ms": 500 },
-      "actions": [{ "type": "toggle", "target": "led1.anode" }]
-    }
-  ],
-
   "app": {
     "wifi": { "enabled": false },
     "log_level": "info"
+  },
+
+  "customCode": {
+    "main/app_main.c": "// agent-written ESP-IDF C ... (overrides generated code)"
   }
 }
 ```
 
-`schemaVersion` is `1`. Future breaking changes will increment this field.
+`customCode` is optional , present only when the agent has written firmware. `drcOverrides` (also optional) holds warning ids the user has dismissed. `schemaVersion` is `1`; future breaking changes will increment it.
 
 ---
 
@@ -570,9 +533,9 @@ Projects are saved as `.circuitiny.json`. The format is stable and human-readabl
 ```
 src/
 ├── agent/          # LLM integration
-│   ├── anthropic.ts / openai.ts / ollama.ts   # provider adapters
+│   ├── anthropic.ts / openai.ts / ollama.ts / claudecode.ts  # provider adapters
 │   ├── chatSession.ts                          # turn loop, tool dispatch
-│   ├── tools.ts                                # all tool definitions + executors
+│   ├── tools.ts                                # tool definitions + HANDLERS dispatch map
 │   └── expertPrompt.ts                         # system prompt for expert mode
 │
 ├── catalog/
@@ -596,18 +559,18 @@ src/
 │   └── Palette.tsx      # component browser sidebar
 │
 ├── project/
-│   ├── schema.ts       # Project, Behavior, Action, Net types
+│   ├── schema.ts       # Project, Net, AppConfig types (no behavior DSL)
+│   ├── pins.ts         # net → GPIO pin resolver
 │   └── component.ts    # ComponentDef, BoardDef, SimDef, PinDef types
 │
 ├── sim/
-│   ├── evaluate.ts     # behavior evaluator: advances sim time, fires triggers
-│   └── useSimLoop.ts   # React hook: 100ms interval, mounted in App.tsx
+│   └── useNativeSimLoop.ts  # React hook: bridges native sim binary ↔ store
 │
 └── store.ts            # Zustand store: all app state + actions
 
 electron/
-├── main.ts     # IPC handlers: file dialogs, catalog IO, idf.py pipeline
-└── preload.ts  # contextBridge: exposes window.circuitiny to the renderer
+├── main.ts     # IPC: file dialogs, catalog IO, idf.py pipeline, native sim compile/run
+└── preload.ts  # contextBridge: exposes window.espAI to the renderer
 ```
 
 **Data flow:**
@@ -615,11 +578,15 @@ electron/
 ```
 Project state (store)
   │
-  ├──► generate.ts ──► Code pane (live C code)
+  ├──► codegen/generate.ts ──► Code pane (live C code; customCode overrides)
+  │                                  │
+  │                                  ▼
+  │                         electron simCompile ──► native binary
+  │                                  │
+  │                                  ▼
+  │              useNativeSimLoop ◄── stdout JSON ──► sim visuals (Viewer3D)
   │
-  ├──► evaluate.ts ──► sim visuals (Viewer3D)
-  │
-  ├──► drc/index.ts ──► DRC overlay + sim guard
+  ├──► drc/index.ts ──► DRC overlay
   │
   └──► agent/tools.ts ──► LLM ──► mutations back to store
 ```
@@ -633,22 +600,20 @@ pnpm dev          # Electron + Vite hot reload
 pnpm typecheck    # TypeScript check (both node and web tsconfigs)
 ```
 
+```bash
+pnpm test         # vitest (codegen + schema unit tests)
+```
+
 **Adding a new agent tool:**
 
 1. Add a `ToolDef` entry to the `tools` array in `src/agent/tools.ts`
-2. Add the executor `case` in `executeInternal`
+2. Add a handler function and register it in the `HANDLERS` map
 3. Mention the tool in `expertPrompt.ts` if the agent should use it proactively
 
-**Adding a new behavior action:**
+**Changing code generation:**
 
-1. Add the new type to the `Action` union in `src/project/schema.ts`
-2. Handle it in `src/sim/evaluate.ts` → `runActions`
-3. Handle it in `src/codegen/generate.ts` → `emitActions`
-4. Add it to the `set_behavior` tool schema in `src/agent/tools.ts`
+1. Adjust the IR in `src/codegen/ir.ts` if you need new resolved data (buses, pin info)
+2. Emit the new C in `src/codegen/generate.ts`
+3. Add/adjust a test in `tests/codegen.test.ts` so CI guards the output
 
-**Adding a new trigger type:**
-
-1. Add to `TriggerKind` in `src/project/schema.ts`
-2. Handle in `src/sim/evaluate.ts` → `firesInWindow`
-3. Handle in `src/codegen/generate.ts` (may need a new task template)
-4. Add to the `set_behavior` tool schema
+**Adding a new component or board:** see [Extending the palette](#extending-the-palette--adding-components) and [Adding boards](#adding-boards).

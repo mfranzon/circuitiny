@@ -1,4 +1,0 @@
-allowBuilds:
-  '0': node-pty
-  '1': electron
-  '2': esbuild
