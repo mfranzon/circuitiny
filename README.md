@@ -1,5 +1,11 @@
 # Circuitiny
 
+[![CI](https://github.com/mfranzon/circuitiny/actions/workflows/ci.yml/badge.svg)](https://github.com/mfranzon/circuitiny/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/mfranzon/circuitiny)](https://github.com/mfranzon/circuitiny/blob/main/LICENSE)
+[![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey)](#prerequisites)
+[![Built with Electron](https://img.shields.io/badge/Electron-2C2E3B?logo=electron&logoColor=9FEAF9)](https://www.electronjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+
 A local-first, AI-assisted circuit design tool for your projects. Wire components in a 3D view, describe what you want to build, and the AI agent writes the firmware and simulates it , all before you touch a physical chip.
 
 ![Circuitiny screenshot](docs/screenshot.png)
